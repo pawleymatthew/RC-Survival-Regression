@@ -1,0 +1,11 @@
+# Experiments: Fibres Strength Data
+
+The following data is from Table 4.1 in Statistical Analysis of Reliability Data by Crowder et al. 
+
+It shows the failure stresses (in GPa) of single carbon fibres of four different lengths (in mm).
+
+```{r}
+fibre_stress_df <- read.csv(file = 'fibres_failure_stress.csv', header = TRUE)
+kable(head(fibre_stress_df ))
+```
+

@@ -1,0 +1,30 @@
+---
+title: "Survival Analysis Regression Reading Course"
+author: "Matthew Pawley"
+date: "Semester 1, 2020-21"
+output:
+  html_document:
+    theme: cosmo
+    toc: true
+    toc_depth: 2
+    number_sections: true
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library("flexsurv")
+library("survival")
+library("knitr")
+set.seed(321)
+```
+
+```{r include=FALSE}
+sections <- c('exploring_flexsurv.Rmd',
+              'implementing_apgw_in_flexsurv.Rmd',
+              'sim_studies_ph_po.Rmd',
+              'experiments_fibres_strength_data.Rmd')
+```
+
+
+```{r child = sections}
+```
