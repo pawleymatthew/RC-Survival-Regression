@@ -1,0 +1,291 @@
+---
+title: 'Simulation studies: PH versus PO'
+author: "Matthew Pawley"
+date: "Semester 1, 2020-21"
+output:
+  html_document:
+    theme: cosmo
+    toc: true
+    toc_depth: 2
+    number_sections: true
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library("flexsurv")
+library("survival")
+library("knitr")
+set.seed(321)
+```
+
+# Simulation studies: PH and PO models
+
+## Introduction
+
+In this section, we run simulation studies to investigate proportional hazards (PH) and proportional odds (PO) models. In particular, we are interested in discovering some qualitative features in the model fit that may hint at an incorrect choice of assumption (i.e. we have fit a PH model when the data is PO, or vice versa). To do this, we simulate PH and PO datasets (each with APGW baseline), fit the two types of models to each dataset, and study the qualitative features of the survival/hazard/cumulative hazard function plots.
+
+## Simulating APGW data
+
+The experiments will involve simulating PH and PO data with APGW baselines. We can simulate APGW variates using inversion sampling. Recalling the cumulative hazard for the APGW
+$$H(t)=\lambda\frac{\kappa+1}{\kappa}\left[\left(1+\frac{(\phi t)^\gamma}{\kappa+1}\right)^\kappa -1\right]$$ 
+then the CDF is given by
+$$F(t)=1-\exp(-H(t))=1-\exp\left\lbrace -\lambda\frac{\kappa+1}{\kappa}\left[\left(\frac{1+(\phi t)^\gamma}{\kappa+1}\right)^\kappa -1\right]\right\rbrace.$$
+and we find that the inverse CDF is given by
+$$F^{-1}(t)=\frac{1}{\phi}\left\lbrace(\kappa+1)\left[\left(\frac{-\kappa}{\lambda(\kappa+1)}\log(1-t)+1\right)^{\frac{1}{\kappa}}-1\right]\right\rbrace^{\frac{1}{\gamma}}.$$
+
+The inversion sampling algorithm for generating $t\sim\mathrm{APGW}$ is as follows:
+
+1. Generate $u$ from $U\sim\mathrm{U}(0,1)$.
+2. Set $t=F^{-1}(1-u)$.
+
+(Note: we typically set $t=F^{-1}(u)$ but using $1-u$ is slightly cheaper computationally and gives the same result, since $1-u$ is also from $U(0,1)$.)
+
+Now we write an R function to simulate APGW variates, using exactly the same syntax as the analogous functions $\texttt{rexp}$, $\texttt{runif}$ etc.
+
+```{r}
+rapgw <- function(n, phi, lambda, gamma, kappa){
+  u <- runif(n=n, min=0, max=1)
+  x <- (1/phi) * ((kappa+1)*((-kappa/(lambda*(kappa+1))*log(u)+1)^(1/kappa)-1))^(1/gamma)
+  return(x)
+}
+```
+
+## Simulating PH data with APGW baseline
+
+Under the PH assumption, the hazard function for group $i=1,\ldots,k$ is given by 
+$$h_i(t)=h_0(t)\theta_i,$$ where $h_0(t)$ is the baseline hazard function and $\theta_i>0$ is the hazard ratio between group $i$ and the baseline.
+
+To simulate from group $i$ data, we just replace $\lambda$ with $\theta_i \lambda$:
+
+```{r}
+rapgwph <- function(n, theta, phi, lambda, gamma, kappa){
+  rapgw(n, phi, theta*lambda, gamma, kappa)
+}
+```
+
+In these experiments, we simulate data for $k+1$ groups. We fix one group to be the 'baseline' group and the survival functions for the other groups are restricted by the PH assumption. 
+
+```{r}
+sim_apgwph_df <- function(k, N, theta, phi, lambda, gamma, kappa, t_max){
+  
+  group <- rep(seq(0,k), each=N)
+  theta = ifelse(group==0, 1, theta[group])
+  
+  # simulate event times
+  t <- mapply(rapgwph, theta, phi, lambda, gamma, kappa, MoreArgs=list(n=1))
+  
+  # administrative censoring at t_max
+  delta <- 1*(t<t_max)
+  t <- pmin(t, t_max)
+  
+  group <- as.factor(group)
+  df <- data.frame(group, theta, phi, lambda, gamma, kappa, t, delta)
+  
+  return(df)
+}
+
+apgwph_df <- sim_apgwph_df(k=2, N=200, theta=c(0.5,1.5), phi=2, lambda=0.7, gamma=1.1, kappa=0.9, t_max=2)
+kable(head(apgwph_df, n=10))
+```
+
+We create a quick plot to see what the data looks like:
+
+```{r}
+# fit an arbitrary models
+fs_arb <- flexsurvreg(Surv(t, delta) ~ group, data=apgwph_df , dist="weibull")
+# create the plot with est=FALSE
+plot(fs_arb, est=FALSE, lwd.obs = 2, lty.obs=1, type="hazard", xlab = "t", ylab = "Hazard, h(t)", main="Proportional hazards data with APGW baseline", yaxs="i", xaxs="i")
+```
+
+
+## Simulating PO data with APGW baseline
+
+The odds of an event are defined as the ratio of the probability of the event occurring and the probability of the event not occurring, then by analogy a PO model is given by 
+$$\frac{1-S(t;\boldsymbol{z})}{S(t;\boldsymbol{z})}=\frac{1-S_0(t)}{S_0(t)}\exp(\boldsymbol{\beta}^T\boldsymbol{z})$$
+where $S_0(t)=S(t;\boldsymbol{0})$ is the baseline survival function, and $\frac{1-S(t;\boldsymbol{z})}{S(t;\boldsymbol{z})}$ represents the odds of the event occurring in $(0,t)$ for an individual with covariate vector $\boldsymbol{z}$.
+
+So for our grouped data, we have 
+$$\frac{1-S_i(t;\boldsymbol{z})}{S_i(t;\boldsymbol{z})}=\frac{1-S_0(t)}{S_0(t)}\theta_i,\qquad i=1,\ldots,k$$
+where $S_0(t)$ is the baseline survival function, and $\theta_i>0$ is the odds ratio between group $i$ and the baseline group. This relation can be rewritten in terms of cumulative hazards:
+$$H_i(t) = \log\left( 1+ \theta_i\left[\exp(H_0(t))-1\right]\right).$$
+
+We have
+$$H_0(t)=\lambda\frac{\kappa+1}{\kappa}\left[\left(1+\frac{(\phi t)^\gamma}{\kappa+1}\right)^\kappa -1\right]$$ 
+so then the CDF for group $i$ is given by
+$$F_i(t)=1-\exp(-H_i(t))=1-\exp\left(-\log\left( 1+ \theta_i\left[\exp(H_0(t))-1\right]\right)\right)$$
+
+and we obtain the inverse CDF 
+$$F_i^{-1}(t)=\frac{1}{\phi}\left\lbrace(\kappa+1)\left[\left(\frac{-\kappa}{\lambda(\kappa+1)}\log\left(\frac{\theta_i(1-t)}{\theta_i+t(1-\theta_i)}\right)+1\right)^{\frac{1}{\kappa}}-1\right]\right\rbrace^{\frac{1}{\gamma}}.$$
+
+We can verify that if $\theta_i=1$ then this reduces to the inverse CDF for the APGW (i.e. the expression inside the $\log()$ becomes $1-t$).
+
+The inversion sampling algorithm for generating an event time for group $i$ is as follows:
+
+1. Generate $u$ from $U\sim\mathrm{U}(0,1)$.
+2. Set $t=F_i^{-1}(u)$.
+
+```{r}
+rapgwpo <- function(n, theta, phi, lambda, gamma, kappa){
+  u <- runif(n=n, min=0, max=1)
+  x <- (1/phi) * ((kappa+1)*((-kappa/(lambda*(kappa+1))*log((theta*(1-u))/(theta+u*(1-theta)))+1)^(1/kappa)-1))^(1/gamma)
+  return(x)
+}
+```
+
+We can now simulate the data in exactly the same way as for the PH simulations.
+
+```{r}
+sim_apgwpo_df <- function(k, N, theta, phi, lambda, gamma, kappa, t_max){
+  
+  group <- rep(seq(0,k), each=N)
+  theta = ifelse(group==0, 1, theta[group])
+  
+  # simulate event times
+  t <- mapply(rapgwpo, theta, phi, lambda, gamma, kappa, MoreArgs=list(n=1))
+  
+  # administrative censoring at t_max
+  delta <- 1*(t<t_max)
+  t <- pmin(t, t_max)
+  
+  group <- as.factor(group)
+  df <- data.frame(group, theta, phi, lambda, gamma, kappa, t, delta)
+  
+  return(df)
+}
+
+apgwpo_df <- sim_apgwpo_df(k=2, N=200, theta=c(0.5,1.5), phi=2, lambda=0.7, gamma=1.1, kappa=0.9, t_max=2)
+kable(head(apgwpo_df, n=10))
+```
+
+We create a quick plot to see what the data looks like:
+
+```{r}
+# fit an arbitrary models
+fs_arb <- flexsurvreg(Surv(t, delta) ~ group, data=apgwpo_df , dist="weibull")
+# create the plot with est=FALSE
+plot(fs_arb, est=FALSE, lwd.obs = 2, lty.obs=1, type="hazard", xlab = "t", ylab = "Hazard, h(t)", main="Proportional odds data with APGW baseline", yaxs="i", xaxs="i")
+```
+
+
+## Fitting PH model with APGW baseline
+
+Specify a custom distribution which fits a PH model where baseline (group 0) is APGW. 
+** Note: at the moment it doesnt set theta=1 for group 0, so none of the groups need be APGW. We want group 0 to be APGW and then all the other groups to be fixed by PH assumption. At the moment, there is some fictional group that is APGW, and the groups are PH with respect to that group, which isn't quite the same thing.**
+
+```{r}
+# hazard function
+hapgwph <- function(x, theta, phi, lambda, gamma, kappa, log=FALSE){
+  theta * hapgw(x, phi, lambda, gamma, kappa, log=FALSE)
+}
+
+# cumulative hazard function
+Hapgwph <- function(x, theta, phi, lambda, gamma, kappa, log=FALSE){
+  theta * Hapgw(x, phi, lambda, gamma, kappa, log=FALSE)
+}
+
+custom.apgwph <- list(
+  name="apgwph",
+  pars=c("theta","phi","lambda","gamma","kappa"),
+  location="theta",
+  transforms=c(log,log,log,log,kappa_transform),
+  inv.transforms=c(exp,exp,exp,exp,kappa_inv_transform),
+  inits=function(t)c(1,1,1,1,1)
+)
+```
+
+## Fitting PO model with APGW baseline
+
+Specify a custom distribution which fits a PO model where baseline (group 0) is APGW. 
+** Note: at the moment it doesnt set theta=1 for group 0, so none of the groups need be APGW. We want group 0 to be APGW and then all the other groups to be fixed by PO assumption. At the moment, there is some fictional group that is APGW, and the groups are PO with respect to that group, which isn't quite the same thing.**
+
+```{r}
+# hazard function
+hapgwpo <- function(x, theta, phi, lambda, gamma, kappa, log=FALSE){
+  num = theta * hapgw(x,phi,lambda,gamma,kappa)
+  den = exp(-Hapgw(x,phi,lambda,gamma,kappa))+theta*(1-exp(-Hapgw(x,phi,lambda,gamma,kappa)))
+  return(num/den)
+}
+
+# cumulative hazard function
+Hapgwpo <- function(x, theta, phi, lambda, gamma, kappa, log=FALSE){
+  log(1+(exp(Hapgw(x,phi,lambda,gamma,kappa))-1)*theta)
+}
+
+custom.apgwpo <- list(
+  name="apgwpo",
+  pars=c("theta","phi","lambda","gamma","kappa"),
+  location="theta",
+  transforms=c(log,log,log,log,kappa_transform),
+  inv.transforms=c(exp,exp,exp,exp,kappa_inv_transform),
+  inits=function(t)c(1,1,1,1,1)
+)
+```
+
+## Fit PH and PO models to the PH data
+
+```{r fig.height=10}
+fs_apgwpo_phdf <- flexsurvreg(Surv(t,delta) ~ group,
+                   data = apgwph_df, 
+                   dist = custom.apgwpo) 
+
+fs_apgwph_phdf <- flexsurvreg(Surv(t,delta) ~ group,
+                   data = apgwph_df, 
+                   dist = custom.apgwph) 
+
+
+cols = c("#E495A5", "#86B875", "#7DB0DD")
+par(mfrow=c(2,1))
+
+plot(fs_apgwph_phdf, col = cols[1], lwd.obs = 2, lty.obs=1, type="survival",
+     xlab = "t", ylab = "Survival function, S(t)", 
+     main="Survival functions - PH data", yaxs="i", xaxs="i")
+lines(fs_apgwpo_phdf, col = cols[2], type="survival")
+text(x=c(2.1,3.5,4), y=c(0.4, 0.52, 0.72), c("Group 0","Group 1","Group 2"))
+legend("bottomleft", col = c("black", cols[1], cols[2]), 
+       lty = c(1, 1, 1), bty = "n", lwd = rep(2, 4),
+       c("Kaplan-Meier", "APGW PH", "APGW PO"))
+
+plot(fs_apgwph_phdf, col = cols[1], lwd.obs = 2, lty.obs=1, type="hazard",
+     xlab = "t", ylab = "Hazard function, h(t)", 
+     main="Hazard functions - PH data", yaxs="i", xaxs="i")
+lines(fs_apgwpo_phdf, col = cols[2], type="hazard")
+text(x=c(2.1,3.5,4), y=c(0.4, 0.52, 0.72), c("Group 0","Group 1","Group 2"))
+legend("topleft", col = c("black", cols[1], cols[2]), 
+       lty = c(1, 1, 1), bty = "n", lwd = rep(2, 4),
+       c("Kernel density estimate", "APGW PH", "APGW PO"))
+```
+
+
+## Fit PH and PO models to the PO data
+
+```{r fig.height=10}
+fs_apgwpo_podf <- flexsurvreg(Surv(t,delta) ~ group,
+                   data = apgwpo_df, 
+                   dist = custom.apgwpo) 
+
+fs_apgwph_podf <- flexsurvreg(Surv(t,delta) ~ group,
+                   data = apgwpo_df, 
+                   dist = custom.apgwph) 
+
+
+cols = c("#E495A5", "#86B875", "#7DB0DD")
+par(mfrow=c(2,1))
+
+plot(fs_apgwph_podf, col = cols[1], lwd.obs = 2, lty.obs=1, type="survival",
+     xlab = "t", ylab = "Survival function, S(t)", 
+     main="Survival functions - PO data", yaxs="i", xaxs="i")
+lines(fs_apgwpo_podf, col = cols[2], type="survival")
+text(x=c(2.1,3.5,4), y=c(0.4, 0.52, 0.72), c("Group 0","Group 1","Group 2"))
+legend("bottomleft", col = c("black", cols[1], cols[2]), 
+       lty = c(1, 1, 1), bty = "n", lwd = rep(2, 4),
+       c("Kaplan-Meier", "APGW PH", "APGW PO"))
+
+plot(fs_apgwph_podf, col = cols[1], lwd.obs = 2, lty.obs=1, type="hazard",
+     xlab = "t", ylab = "Hazard function, h(t)", 
+     main="Hazard functions - PO data", yaxs="i", xaxs="i")
+lines(fs_apgwpo_podf, col = cols[2], type="hazard")
+text(x=c(2.1,3.5,4), y=c(0.4, 0.52, 0.72), c("Group 0","Group 1","Group 2"))
+legend("bottomright", col = c("black", cols[1], cols[2]), 
+       lty = c(1, 1, 1), bty = "n", lwd = rep(2, 4),
+       c("Kernel density estimate", "APGW PH", "APGW PO"))
+```
