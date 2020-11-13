@@ -16,6 +16,7 @@ library("flexsurv")
 library("survival")
 library("knitr")
 library("rms")
+library("dplyr")
 set.seed(321)
 ```
 
@@ -25,7 +26,6 @@ sections <- c('exploring_flexsurv.Rmd',
               'sim_studies_ph_po.Rmd',
               'experiments_fibres_strength_data.Rmd')
 ```
-
 
 ```{r child = sections}
 ```

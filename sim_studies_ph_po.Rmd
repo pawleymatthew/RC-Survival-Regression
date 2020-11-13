@@ -68,7 +68,7 @@ sim_apgwph_df <- function(k, N, theta, phi, lambda, gamma, kappa, t_max){
 Now we simulate a PH dataset.
 
 ```{r}
-apgwph_df <- sim_apgwph_df(k=2, N=200, theta=c(0.5,1.5), phi=2, lambda=0.7, gamma=1.1, kappa=0.9, t_max=1.5)
+apgwph_df <- sim_apgwph_df(k=2, N=350, theta=c(0.5,1.5), phi=2, lambda=0.9, gamma=1.2, kappa=0.9, t_max=1.5)
 ```
 
 
@@ -147,7 +147,7 @@ sim_apgwpo_df <- function(k, N, theta, phi, lambda, gamma, kappa, t_max){
 Now we simulate a PO dataset (same size and number of groups as the PH dataset).
 
 ```{r}
-apgwpo_df <- sim_apgwpo_df(k=2, N=200, theta=c(0.5,1.5), phi=2, lambda=0.7, gamma=1.1, kappa=0.9, t_max=2)
+apgwpo_df <- sim_apgwpo_df(k=2, N=350, theta=c(0.5,1.5), phi=2, lambda=0.9, gamma=1.2, kappa=0.9, t_max=1.5)
 ```
 
 The head and tail of the dataset is shown below (it is essntially the same as the PH dataset, except now $\theta$ represents an odds ratio rather than a hazards ratio).
@@ -160,9 +160,6 @@ kable(tail(apgwpo_df, n=5))
 Now we plot the odds to check proportionality. This is not straightforward to do directly using $\text{flexsurv}$, so we use $\text{survfit}$ to fit and plot the non-parametric estimates of the odds functions. Later we will overlay the odds functions for fitted models using  the $\texttt{fn}$ argument of the plot method in $\text{flexsurv}$.
 
 ```{r echo=FALSE}
-# fit an arbitrary model
-fs_arb <- flexsurvreg(Surv(t, delta) ~ group, data=apgwpo_df , dist="weibull")
-
 km_fit <- survfit(Surv(t, delta) ~ group, data = apgwpo_df)
 plot(km_fit, 
      fun = function(x) {(1-x)/x}, # odds = (1-S)/S
@@ -175,10 +172,9 @@ plot(km_fit,
 
 ## Fitting PH model with APGW baseline
 
-Specify a custom distribution which fits a PH model where baseline (group 0) is APGW. 
-** Note: at the moment it doesnt set theta=1 for group 0, so none of the groups need be APGW. We want group 0 to be APGW and then all the other groups to be fixed by PH assumption. At the moment, there is some fictional group that is APGW, and the groups are PH with respect to that group, which isn't quite the same thing.**
+Specify a custom distribution which fits a PH model where baseline (group 0) is APGW. Note: at the moment it doesnt set theta=1 for group 0, so none of the groups need be APGW. We want group 0 to be APGW and then all the other groups to be fixed by PH assumption. At the moment, there is some fictional group that is APGW, and the groups are PH with respect to that group, which isn't quite the same thing.
 
-```{r eval=FALSE, include=FALSE}
+```{r}
 # hazard function
 hapgwph <- function(x, theta, phi, lambda, gamma, kappa, log=FALSE){
   theta * hapgw(x, phi, lambda, gamma, kappa, log=FALSE)
@@ -201,10 +197,9 @@ custom.apgwph <- list(
 
 ## Fitting PO model with APGW baseline
 
-Specify a custom distribution which fits a PO model where baseline (group 0) is APGW. 
-** Note: at the moment it doesnt set theta=1 for group 0, so none of the groups need be APGW. We want group 0 to be APGW and then all the other groups to be fixed by PO assumption. At the moment, there is some fictional group that is APGW, and the groups are PO with respect to that group, which isn't quite the same thing.**
+Specify a custom distribution which fits a PO model where baseline (group 0) is APGW. Note: at the moment it doesnt set theta=1 for group 0, so none of the groups need be APGW. We want group 0 to be APGW and then all the other groups to be fixed by PO assumption. At the moment, there is some fictional group that is APGW, and the groups are PO with respect to that group, which isn't quite the same thing.
 
-```{r eval=FALSE, include=FALSE}
+```{r}
 # hazard function
 hapgwpo <- function(x, theta, phi, lambda, gamma, kappa, log=FALSE){
   num = theta * hapgw(x,phi,lambda,gamma,kappa)
@@ -229,17 +224,20 @@ custom.apgwpo <- list(
 
 ## Fit PH and PO models to the PH data
 
-```{r eval=FALSE, fig.height=10, include=FALSE}
+```{r message=FALSE, warning=FALSE}
+# fit PO model to PH data
 fs_apgwpo_phdf <- flexsurvreg(Surv(t,delta) ~ group,
                    data = apgwph_df, 
                    dist = custom.apgwpo) 
-
+# fit PH model to PH data
 fs_apgwph_phdf <- flexsurvreg(Surv(t,delta) ~ group,
                    data = apgwph_df, 
                    dist = custom.apgwph) 
+```
 
+Now plot the survival functions to check general model fit and the hazards to check model fit and hazard (non) proportionality.
 
-cols = c("#E495A5", "#86B875", "#7DB0DD")
+```{r echo=FALSE, fig.height=10}
 par(mfrow=c(2,1))
 
 plot(fs_apgwph_phdf, col = cols[1], lwd.obs = 2, lty.obs=1, type="survival",
@@ -264,34 +262,59 @@ legend("topleft", col = c("black", cols[1], cols[2]),
 
 ## Fit PH and PO models to the PO data
 
-```{r eval=FALSE, fig.height=10, include=FALSE}
+```{r message=FALSE, warning=FALSE}
+# fit PO model to PO data
 fs_apgwpo_podf <- flexsurvreg(Surv(t,delta) ~ group,
                    data = apgwpo_df, 
                    dist = custom.apgwpo) 
-
+# fit PH model to PO data
 fs_apgwph_podf <- flexsurvreg(Surv(t,delta) ~ group,
                    data = apgwpo_df, 
                    dist = custom.apgwph) 
+```
+
+Now plot the survival functions to check general model fit and the odds functions to check model fit and odds (non) proportionality.
+
+We have already made some code that plots the non-parametric estimate of the odds function (transform of the KM estimate for the survival function). To plot the odds functions for the fitted model, we need to make use of the $\texttt{fn}$ argument of $\texttt{plot.flexsurvreg}$ (see documentation for how $\texttt{fn}$ needs to be formatted). Since we already have functions that evaluate the cumulative hazard functions for these models, the most convenient form is to use
+$$O(t)=\frac{1-S(t)}{S(t)}=\frac{1-\exp(-H(t))}{\exp(-H(t))}=\exp(H(t))-1.$$
+
+```{r}
+odds_apgwph <- function(t, start, theta, phi, lambda, gamma, kappa){
+  exp(Hapgwph(t,theta,phi,lambda,gamma,kappa))-1
+}
+
+odds_apgwpo <- function(t, start, theta, phi, lambda, gamma, kappa){
+  exp(Hapgwpo(t,theta,phi,lambda,gamma,kappa))-1
+}
+```
 
 
-cols = c("#E495A5", "#86B875", "#7DB0DD")
+```{r echo=FALSE, fig.height=10}
 par(mfrow=c(2,1))
 
+# plot survival functions
 plot(fs_apgwph_podf, col = cols[1], lwd.obs = 2, lty.obs=1, type="survival",
      xlab = "t", ylab = "Survival function, S(t)", 
      main="Survival functions - PO data", yaxs="i", xaxs="i")
 lines(fs_apgwpo_podf, col = cols[2], type="survival")
-text(x=c(2.1,3.5,4), y=c(0.4, 0.52, 0.72), c("Group 0","Group 1","Group 2"))
 legend("bottomleft", col = c("black", cols[1], cols[2]), 
        lty = c(1, 1, 1), bty = "n", lwd = rep(2, 4),
        c("Kaplan-Meier", "APGW PH", "APGW PO"))
 
-plot(fs_apgwph_podf, col = cols[1], lwd.obs = 2, lty.obs=1, type="hazard",
-     xlab = "t", ylab = "Hazard function, h(t)", 
-     main="Hazard functions - PO data", yaxs="i", xaxs="i")
-lines(fs_apgwpo_podf, col = cols[2], type="hazard")
-text(x=c(2.1,3.5,4), y=c(0.4, 0.52, 0.72), c("Group 0","Group 1","Group 2"))
-legend("bottomright", col = c("black", cols[1], cols[2]), 
+# plot odds functions
+km_fit <- survfit(Surv(t, delta) ~ group, data = apgwpo_df)
+plot(km_fit, 
+     fun = function(x) {(1-x)/x}, # odds = (1-S)/S
+     lwd = 2,
+     xlab = "t", ylab = "Odds, O(t)", main="Odds functions - PO data", 
+     yaxs="i", xaxs="i"
+     ) 
+lines(fs_apgwph_podf, col = cols[1], fn=odds_apgwph)
+lines(fs_apgwpo_podf, col = cols[2], fn=odds_apgwpo)
+legend("topleft", col = c("black", cols[1], cols[2]), 
        lty = c(1, 1, 1), bty = "n", lwd = rep(2, 4),
-       c("Kernel density estimate", "APGW PH", "APGW PO"))
+       c("Non-parametric estimate", "APGW PH", "APGW PO"))
 ```
+
+
+
