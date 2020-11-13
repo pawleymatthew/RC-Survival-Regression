@@ -72,13 +72,13 @@ Again we suppress the conditionalities for brevity and in the case where there i
 
 For these likelihoods to be valid, we assume the individual survival times are independent and the censoring times are distributed independently of the parameters $\boldsymbol{\theta}$.
 
-## Fitting standard parametric survival models
+## Fitting parametric survival models in $\texttt{flexsurv}$
 
 ### The $\texttt{bc}$ dataset
 
 To demonstrate the functionality of $\texttt{flexsurv}$, we use the in-built dataset $\texttt{bc}$, which contains 686 patients with breast cancer. 
 
-```{r message=FALSE}
+```{r echo=FALSE, message=FALSE}
 kable(head(bc))
 ```
 
@@ -103,7 +103,7 @@ If the $\texttt{dist}$ argument is a string, then it uses a built in parametric 
 
 Printing the fitted model gives useful information, including the parameter estimates and associated confidence intervals. 
 
-```{r}
+```{r echo=FALSE}
 fs1
 ```
 
@@ -130,7 +130,7 @@ The $\texttt{plot()}$ method can be applied to $\texttt{flexsurvreg}$ objects. T
 
 Any function $\texttt{fn}$ of the parameters of a fitted model can be summarised by passing $\texttt{fn}$ into the $\texttt{summary()}$ method. Confidence intervals are obtained by bootstrap sampling, the argument $\texttt{B}$ can be adjusted to obtain the desired level of precision.
 
-```{r}
+```{r eval=FALSE, include=FALSE}
 median.weibull <- function(shape, scale){qweibull(0.5, shape, scale)}
 summary(fs1, fn=median.weibull, t=2, B=10000)
 ```

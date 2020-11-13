@@ -97,9 +97,9 @@ fs_weibull_aft <- flexsurvreg(Surv(recyrs,censrec) ~ group, data=bc, dist="weibu
 fs_gg_aft <- flexsurvreg(Surv(recyrs,censrec) ~ group, data=bc, dist="gengamma")
 ```
 
-Now we create plots of the model fit:
+The plots below show the various model fits.
 
-```{r fig.height = 13, fig.width=15}
+```{r echo=FALSE, fig.height=13, fig.width=15}
 cols = c("#E495A5", "#86B875", "#7DB0DD")
 par(mfrow=c(2,2))
 

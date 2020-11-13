@@ -2,7 +2,7 @@
 
 ## Introduction
 
-In this section, we run simulation studies to investigate proportional hazards (PH) and proportional odds (PO) models. In particular, we are interested in discovering some qualitative features in the model fit that may hint at an incorrect choice of assumption (i.e. we have fit a PH model when the data is PO, or vice versa). To do this, we simulate PH and PO datasets (each with APGW baseline), fit the two types of models to each dataset, and study the qualitative features of the survival/hazard/cumulative hazard function plots.
+In this section, we run simulation studies to investigate proportional hazards (PH) and proportional odds (PO) models. We want to discover qualitative features in the model fit that hint at an incorrect choice of assumption (i.e. we have fit a PH model when the data is PO, or vice versa). To do this, we simulate PH and PO datasets (each with APGW baseline), fit the two types of models to each dataset, and study the qualitative features of the survival/hazard/cumulative hazard function plots.
 
 ## Simulating APGW data
 
@@ -20,7 +20,7 @@ The inversion sampling algorithm for generating $t\sim\mathrm{APGW}$ is as follo
 
 (Note: we typically set $t=F^{-1}(u)$ but using $1-u$ is slightly cheaper computationally and gives the same result, since $1-u$ is also from $U(0,1)$.)
 
-Now we write an R function to simulate APGW variates, using exactly the same syntax as the analogous functions $\texttt{rexp}$, $\texttt{runif}$ etc.
+Now we write an R function to simulate $n$ APGW variates, using exactly the same syntax as the analogous functions $\texttt{rexp}$, $\texttt{runif}$ etc.
 
 ```{r}
 rapgw <- function(n, phi, lambda, gamma, kappa){
@@ -35,7 +35,7 @@ rapgw <- function(n, phi, lambda, gamma, kappa){
 Under the PH assumption, the hazard function for group $i=1,\ldots,k$ is given by 
 $$h_i(t)=h_0(t)\theta_i,$$ where $h_0(t)$ is the baseline hazard function and $\theta_i>0$ is the hazard ratio between group $i$ and the baseline.
 
-To simulate from group $i$ data, we just replace $\lambda$ with $\theta_i \lambda$:
+The following function simulates $n$ variates from a distribution that has odds ratio $\theta$ relative to an $\mathrm{APGW}(\phi,\lambda,\gamma,\kappa)$ baseline.
 
 ```{r}
 rapgwph <- function(n, theta, phi, lambda, gamma, kappa){
@@ -63,20 +63,30 @@ sim_apgwph_df <- function(k, N, theta, phi, lambda, gamma, kappa, t_max){
   
   return(df)
 }
-
-apgwph_df <- sim_apgwph_df(k=2, N=200, theta=c(0.5,1.5), phi=2, lambda=0.7, gamma=1.1, kappa=0.9, t_max=2)
-kable(head(apgwph_df, n=10))
 ```
 
-We create a quick plot to see what the data looks like:
+Now we simulate a PH dataset.
 
 ```{r}
+apgwph_df <- sim_apgwph_df(k=2, N=200, theta=c(0.5,1.5), phi=2, lambda=0.7, gamma=1.1, kappa=0.9, t_max=1.5)
+```
+
+
+The head and tail of the dataset is shown below:
+
+```{r echo=FALSE}
+kable(head(apgwph_df, n=5))
+kable(tail(apgwph_df, n=5))
+```
+
+We can plot the non-parametric estimates of the cumulative hazards to check if they look proportional (although if the sample size is small it may be hard to tell with any great confidence):
+
+```{r echo=FALSE}
 # fit an arbitrary models
 fs_arb <- flexsurvreg(Surv(t, delta) ~ group, data=apgwph_df , dist="weibull")
 # create the plot with est=FALSE
 plot(fs_arb, est=FALSE, lwd.obs = 2, lty.obs=1, type="hazard", xlab = "t", ylab = "Hazard, h(t)", main="Proportional hazards data with APGW baseline", yaxs="i", xaxs="i")
 ```
-
 
 ## Simulating PO data with APGW baseline
 
@@ -132,18 +142,34 @@ sim_apgwpo_df <- function(k, N, theta, phi, lambda, gamma, kappa, t_max){
   
   return(df)
 }
-
-apgwpo_df <- sim_apgwpo_df(k=2, N=200, theta=c(0.5,1.5), phi=2, lambda=0.7, gamma=1.1, kappa=0.9, t_max=2)
-kable(head(apgwpo_df, n=10))
 ```
 
-We create a quick plot to see what the data looks like:
+Now we simulate a PO dataset (same size and number of groups as the PH dataset).
 
 ```{r}
-# fit an arbitrary models
+apgwpo_df <- sim_apgwpo_df(k=2, N=200, theta=c(0.5,1.5), phi=2, lambda=0.7, gamma=1.1, kappa=0.9, t_max=2)
+```
+
+The head and tail of the dataset is shown below (it is essntially the same as the PH dataset, except now $\theta$ represents an odds ratio rather than a hazards ratio).
+
+```{r echo=FALSE}
+kable(head(apgwpo_df, n=5))
+kable(tail(apgwpo_df, n=5))
+```
+
+Now we plot the odds to check proportionality. This is not straightforward to do directly using $\text{flexsurv}$, so we use $\text{survfit}$ to fit and plot the non-parametric estimates of the odds functions. Later we will overlay the odds functions for fitted models using  the $\texttt{fn}$ argument of the plot method in $\text{flexsurv}$.
+
+```{r echo=FALSE}
+# fit an arbitrary model
 fs_arb <- flexsurvreg(Surv(t, delta) ~ group, data=apgwpo_df , dist="weibull")
-# create the plot with est=FALSE
-plot(fs_arb, est=FALSE, lwd.obs = 2, lty.obs=1, type="hazard", xlab = "t", ylab = "Hazard, h(t)", main="Proportional odds data with APGW baseline", yaxs="i", xaxs="i")
+
+km_fit <- survfit(Surv(t, delta) ~ group, data = apgwpo_df)
+plot(km_fit, 
+     fun = function(x) {(1-x)/x}, # odds = (1-S)/S
+     lwd = 2,
+     xlab = "t", ylab = "Odds, O(t)", main="Proportional odds data with APGW baseline", 
+     yaxs="i", xaxs="i"
+     ) 
 ```
 
 
@@ -152,7 +178,7 @@ plot(fs_arb, est=FALSE, lwd.obs = 2, lty.obs=1, type="hazard", xlab = "t", ylab 
 Specify a custom distribution which fits a PH model where baseline (group 0) is APGW. 
 ** Note: at the moment it doesnt set theta=1 for group 0, so none of the groups need be APGW. We want group 0 to be APGW and then all the other groups to be fixed by PH assumption. At the moment, there is some fictional group that is APGW, and the groups are PH with respect to that group, which isn't quite the same thing.**
 
-```{r}
+```{r eval=FALSE, include=FALSE}
 # hazard function
 hapgwph <- function(x, theta, phi, lambda, gamma, kappa, log=FALSE){
   theta * hapgw(x, phi, lambda, gamma, kappa, log=FALSE)
@@ -178,7 +204,7 @@ custom.apgwph <- list(
 Specify a custom distribution which fits a PO model where baseline (group 0) is APGW. 
 ** Note: at the moment it doesnt set theta=1 for group 0, so none of the groups need be APGW. We want group 0 to be APGW and then all the other groups to be fixed by PO assumption. At the moment, there is some fictional group that is APGW, and the groups are PO with respect to that group, which isn't quite the same thing.**
 
-```{r}
+```{r eval=FALSE, include=FALSE}
 # hazard function
 hapgwpo <- function(x, theta, phi, lambda, gamma, kappa, log=FALSE){
   num = theta * hapgw(x,phi,lambda,gamma,kappa)
@@ -203,7 +229,7 @@ custom.apgwpo <- list(
 
 ## Fit PH and PO models to the PH data
 
-```{r fig.height=10}
+```{r eval=FALSE, fig.height=10, include=FALSE}
 fs_apgwpo_phdf <- flexsurvreg(Surv(t,delta) ~ group,
                    data = apgwph_df, 
                    dist = custom.apgwpo) 
@@ -238,7 +264,7 @@ legend("topleft", col = c("black", cols[1], cols[2]),
 
 ## Fit PH and PO models to the PO data
 
-```{r fig.height=10}
+```{r eval=FALSE, fig.height=10, include=FALSE}
 fs_apgwpo_podf <- flexsurvreg(Surv(t,delta) ~ group,
                    data = apgwpo_df, 
                    dist = custom.apgwpo) 

@@ -15,6 +15,7 @@ knitr::opts_chunk$set(echo = TRUE)
 library("flexsurv")
 library("survival")
 library("knitr")
+library("rms")
 set.seed(321)
 ```
 
