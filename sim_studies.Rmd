@@ -1,0 +1,330 @@
+# Simulation studies: PH and PO models
+
+## Introduction
+
+In this section we simulate some datasets that satisfy the PH or PO assumptions with APGW baseline. We then fit various types of model to these datasets. 
+
+## Simulating APGW data
+
+The first step is generate APGW event times using inversion sampling. 
+
+Recalling the cumulative hazard for the APGW
+$$H(t)=\lambda\frac{\kappa+1}{\kappa}\left[\left(1+\frac{(\phi t)^\gamma}{\kappa+1}\right)^\kappa -1\right]$$ 
+then the CDF is given by
+$$F(t)=1-\exp(-H(t))=1-\exp\left\lbrace -\lambda\frac{\kappa+1}{\kappa}\left[\left(\frac{1+(\phi t)^\gamma}{\kappa+1}\right)^\kappa -1\right]\right\rbrace.$$
+and we find that the inverse CDF is given by
+$$F^{-1}(t)=\frac{1}{\phi}\left\lbrace(\kappa+1)\left[\left(\frac{-\kappa}{\lambda(\kappa+1)}\log(1-t)+1\right)^{\frac{1}{\kappa}}-1\right]\right\rbrace^{\frac{1}{\gamma}}.$$
+
+The inversion sampling algorithm for generating $t\sim\mathrm{APGW}$ is as follows:
+
+1. Generate $u$ from $U\sim\mathrm{U}(0,1)$.
+2. Set $t=F^{-1}(1-u)$.
+
+(Note: we typically set $t=F^{-1}(u)$ but using $1-u$ is slightly cheaper computationally and gives the same result, since $1-u$ is also from $U(0,1)$.)
+
+Now we write an R function to simulate $n$ APGW variates, using exactly the same syntax as the analogous functions $\texttt{rexp}$, $\texttt{runif}$ etc.
+
+```{r}
+rapgw <- function(n, phi, lambda, gamma, kappa){
+  u <- runif(n=n, min=0, max=1)
+  x <- (1/phi) * ((kappa+1)*((-kappa/(lambda*(kappa+1))*log(u)+1)^(1/kappa)-1))^(1/gamma)
+  return(x)
+}
+```
+
+## Simulate datasets with APGW baseline
+
+We now create synthetic datasets consisting of groups such that $H_0(t)$ is an APGW basline and group $i$ has CH $H(t|\theta_i)$, where $\theta$ is a parameter that defines a parametric family (e.g. scale, frailty, tilt, reverse-tilt).
+
+To do this, we need an inversion sampling algorithm for each family.
+
+TO DO: make these derivations much nicer. Derive $H_0^{-1}$, do the family wise inversion separately and then plug in $H_0^{-1}$. They are all similar in terms of method, so should be able to do things more concisely. 
+
+### Inversion algorithm for scale family
+
+For AFT, we have $S(t|\theta)=S_0(\theta t)$ and so 
+\begin{align*}
+H(t|\theta) 
+=-\log(S(t|\theta))
+&=-\log(S_0(\theta t)) \\
+&= -\log(\exp(-H_0(\theta t))) \\
+&= -\log\left(\exp\left(-\lambda\frac{\kappa+1}{\kappa}\left[\left(1+\frac{(\phi t)^\gamma}{\kappa+1}\right)^\kappa -1\right]\right)\right)
+\end{align*}
+
+### Inversion algorithm for frailty family
+
+For proportional hazards, the relation between the cumulative hazards is given by
+$$H(t|\theta) = \theta H_0(t).$$
+We have
+$$H_0(t)=\lambda\frac{\kappa+1}{\kappa}\left[\left(1+\frac{(\phi t)^\gamma}{\kappa+1}\right)^\kappa -1\right]$$ 
+so then
+\begin{align*}
+F(t|\theta) 
+= 1-\exp(-H(t|\theta)) 
+&= 1-\exp(-\theta H_0(t)) \\
+&= 1-\exp\left(-\theta\lambda\frac{\kappa+1}{\kappa}\left[\left(1+\frac{(\phi t)^\gamma}{\kappa+1}\right)^\kappa -1\right] \right)
+\end{align*}
+and we obtain the inverse CDF (by inspection, since this is just the APGW CDF $\lambda$ replaced by $\theta\lambda$)
+$$F^{-1}(t)=\frac{1}{\phi}\left\lbrace(\kappa+1)\left[\left(\frac{-\kappa}{\theta\lambda(\kappa+1)}\log(1-t)+1\right)^{\frac{1}{\kappa}}-1\right]\right\rbrace^{\frac{1}{\gamma}}.$$
+
+The inversion sampling algorithm for generating an event time for group $i$ is as follows:
+
+1. Generate $u$ from $U\sim\mathrm{U}(0,1)$.
+2. Set $t=F_i^{-1}(u)$.
+
+```{r}
+rapgw_frailty <- function(n, theta, phi, lambda, gamma, kappa){
+  # INPUT:
+    # n : number of samples to generate
+    # theta : frailty parameter
+    # phi, lambda, gamma, kappa : parameters of the APGW baseline distribution
+  # OUTPUT:
+    # n event times t~H(.|theta), where H_0~APGW and theta is frailty parameter
+  
+  rapgw(n, phi, theta*lambda, gamma, kappa)
+}
+```
+
+### Inversion algorithm for tilt family
+
+For proportional odds, we have 
+$$\frac{1-S(t|\theta)}{S(t|\theta)}=\frac{1-S_0(t)}{S_0(t)}\theta$$
+where $S_0(t)$ is the baseline survival function, and $\theta>0$ is the odds ratio relative to the baseline. This relation can be rewritten in terms of cumulative hazards:
+$$H(t|\theta) = \log\left( 1+ \theta\left[\exp(H_0(t))-1\right]\right).$$
+We have
+$$H_0(t)=\lambda\frac{\kappa+1}{\kappa}\left[\left(1+\frac{(\phi t)^\gamma}{\kappa+1}\right)^\kappa -1\right]$$ 
+so then
+$$F(t|\theta)=1-\exp(-H(t|\theta))=1-\exp\left(-\log\left( 1+ \theta\left[\exp(H_0(t))-1\right]\right)\right)$$
+and we obtain the inverse CDF 
+$$F^{-1}(t|\theta)=\frac{1}{\phi}\left\lbrace(\kappa+1)\left[\left(\frac{-\kappa}{\lambda(\kappa+1)}\log\left(\frac{\theta(1-t)}{\theta+t(1-\theta)}\right)+1\right)^{\frac{1}{\kappa}}-1\right]\right\rbrace^{\frac{1}{\gamma}}.$$
+
+The inversion sampling algorithm for generating an event time for group $i$ is as follows:
+
+1. Generate $u$ from $U\sim\mathrm{U}(0,1)$.
+2. Set $t=F_i^{-1}(u)$.
+
+```{r}
+rapgw_tilt <- function(n, theta, phi, lambda, gamma, kappa){
+  # INPUT:
+    # n : number of samples to generate
+    # theta : tilt parameter
+    # phi, lambda, gamma, kappa : parameters of the APGW baseline distribution
+  # OUTPUT:
+    # n event times t~H(.|theta), where H_0~APGW and theta is tilt parameter
+  
+  u <- runif(n=n, min=0, max=1)
+  x <- (1/phi) * ((kappa+1)*((-kappa/(lambda*(kappa+1))*log((theta*(1-u))/(theta+u*(1-theta)))+1)^(1/kappa)-1))^(1/gamma)
+  return(x)
+}
+```
+
+### Inversion algorithm for reverse-tilt family
+
+Would be nice to do this for completeness.
+
+### Simulating the datasets
+
+```{r}
+sim_df <- function(K, N, t_max, phi, lambda, gamma, kappa, theta, family){
+  # INPUT:
+    # K : number of groups
+    # N : number of individuls per group
+    # t_max : administrative censoring time
+    # phi, lambda, gamma, kappa : parameters of the APGW baseline distribution
+    # theta : a K-vector of parameters, whose interpretation is given by "family"
+    # family : the parametric family - "scale", "frailty", "tilt", "rev_tilt"
+  # OUTPUT:
+    # a dataframe with K*N observations, where group i event times are H(t|theta_i), with admin censoring at t_max
+  
+  group <- rep(seq(1,K), each=N)
+  theta <- theta[group]
+  
+  # simulate event times
+  if(family == "scale"){t <- mapply(rapgw_scale, theta, phi, lambda, gamma, kappa, MoreArgs=list(n=1))}
+  else if(family == "frailty"){t <- mapply(rapgw_frailty, theta, phi, lambda, gamma, kappa, MoreArgs=list(n=1))}
+  else if(family == "tilt"){t <- mapply(rapgw_tilt, theta, phi, lambda, gamma, kappa, MoreArgs=list(n=1))}
+  else if(family == "rev_tilt")stop("Reverse-tilt family not yet implemented.")
+  else stop(cat("distribution must be \"scale\", \"frailty\", \"tilt\", or \"rev-tilt\""))
+
+  # administrative censoring at t_max
+  delta <- 1*(t<t_max)
+  t <- pmin(t,t_max)
+  
+  # create dataframe
+  group <- as.factor(group)
+  df <- data.frame(group, theta, phi, lambda, gamma, kappa, t, delta)
+  
+  return(df)
+}
+
+# set parameter values (common to all datasets)
+K <- 3
+N <- 250
+t_max <- 1.5
+theta <- c(0.3, 1, 2)
+phi <- 2
+lambda <- 0.9
+gamma <- 1.2
+kappa <- 0.9
+
+# simulate the datasets
+scale_df <- sim_df(K, N, t_max, phi, lambda, gamma, kappa, theta, "frailty")
+frailty_df <- sim_df(K, N, t_max, phi, lambda, gamma, kappa, theta, "frailty")
+tilt_df <- sim_df(K, N, t_max, phi, lambda, gamma, kappa, theta, "tilt")
+#rev_tilt_df <- sim_df(K, N, t_max, phi, lambda, gamma, kappa, theta, "rev_tilt")
+
+# non-parametric estimate of survival function for each dataset (used for plotting)
+km_scale <- survfit(Surv(t, delta) ~ group, data = scale_df)
+km_frailty <- survfit(Surv(t, delta) ~ group, data = frailty_df)
+km_tilt <- survfit(Surv(t, delta) ~ group, data = tilt_df)
+#km_rev_tilt <- survfit(Surv(t, delta) ~ group, data = rev_tilt_df)
+```
+
+Now we make diagnostic plots to verify/check that they work as expected:
+
+* $\texttt{scale_df}$ - the times should be proportional, so plot the log of the CHs against log t and check they are horizontally shifted copies of one another.
+* $\texttt{frailty_df}$ - the cumulative hazards should be proportional, so plot the log of the CHs and check that they are vertically shifted copies of one another.
+* $\texttt{tilt_df}$ - the odds should be proportional, so plot the log of the odds functions and check that they are vertically shifted copies of one another.
+* $\texttt{rev_tilt_df}$ - the Gompertz times should be proportional, so plot...
+
+```{r echo=FALSE, fig.height=15, fig.width=15}
+# plot 1: data=scale_df, x=log(t), y=S
+# plot 2: data=frailty_df, x=t, y=log(H)
+# plot 3: data=tilt_df, x=t, y=log(O)
+# plot 4: data=rev_tilt_df, x=?, y=?
+
+# (mfrow=c(2,2), lty=1, lwd=2, xaxs="i", yaxs="i")
+par(mfrow=c(2,2), lty=1, lwd=2)
+
+par(mfg = c(1, 1))
+plot(km_scale, 
+     fun = "cloglog", # survival function
+     xlab = "log t", 
+     ylab = "log H(t)", 
+     main="scale_df")
+
+par(mfg = c(1, 2))
+plot(km_frailty, 
+     fun = function(x) {log(-log(x))}, # log(H) = log(-log(S))
+     xlab = "t", 
+     ylab = "log H(t)", 
+     main="frailty_df") 
+
+par(mfg = c(2, 1))
+plot(km_tilt, 
+     fun = function(x) {log((1-x)/x)}, # log(O) = log[(1-S)/S]
+     xlab = "t", 
+     ylab = "log O(t)", 
+     main="tilt_df") 
+
+par(mfg = c(2, 2))
+plot(NULL,
+     xlim=c(0,1),
+     ylim=c(0,1),
+     xlab = "t", 
+     ylab = "S(t)", 
+     main="rev_tilt_df") 
+```
+
+
+## Custom distributions: parametric families with APGW baseline
+
+We now fit models corresponding to each of the parametric families (i.e. scale/frailty/tilt/reverse-tilt with APGW baseline). To do this we define some more custom distributions in $\texttt{flexsurv}$.
+
+### Scale family
+
+Do this. 
+
+### Frailty family
+
+The hazard and cumulate hazard for the frailty family are very straightforward due to the proportional hazards interpretation.
+
+```{r}
+hapgwpfrailty <- function(x, phi, lambda, gamma, kappa, theta, log=FALSE){
+  theta * hapgw(x, phi, lambda, gamma, kappa, log=FALSE)
+}
+
+Hapgwpfrailty <- function(x, phi, lambda, gamma, kappa, theta, log=FALSE){
+  theta * Hapgw(x, phi, lambda, gamma, kappa, log=FALSE)
+}
+
+custom.apgwfrailty <- list(
+  name="apgwfrailty",
+  pars=c("phi","lambda","gamma","kappa", "theta"),
+  location="theta",
+  transforms=c(log,log,log,kappa_transform,log),
+  inv.transforms=c(exp,exp,exp,kappa_inv_transform,exp),
+  inits=function(t)c(1,1,1,1,1)
+)
+```
+
+### Tilt family
+
+Recall that the proprtional odds assumption can be written in terms of cumulative hazards as
+$$H(t|\theta) = \log\left(1+\theta\left[\exp(H_0(t))-1\right]\right).$$
+We differentiate this expression with respect to $t$ to get the hazard function
+$$h(t|\theta) = \frac{\theta h_0(t)\exp(H_0(t))}{1+\theta\left[\exp(H_0(t))-1\right]}.$$
+
+```{r}
+hapgwtilt <- function(x, theta, phi, lambda, gamma, kappa, log=FALSE){
+  num = theta * hapgw(x,phi,lambda,gamma,kappa) * Hapgw(x,phi,lambda,gamma,kappa)
+  den = 1 + theta*(exp(Hapgw(x,phi,lambda,gamma,kappa)-1))
+  return(num/den)
+}
+
+Hapgwtilt <- function(x, theta, phi, lambda, gamma, kappa, log=FALSE){
+  log(1+(exp(Hapgw(x,phi,lambda,gamma,kappa))-1)*theta)
+}
+
+custom.apgwtilt <- list(
+  name="apgwtilt",
+  pars=c("phi","lambda","gamma","kappa","theta"),
+  location="theta",
+  transforms=c(log,log,log,kappa_transform,log),
+  inv.transforms=c(exp,exp,exp,kappa_inv_transform,exp),
+  inits=function(t)c(1,1,1,1,1)
+)
+```
+
+### Reverse-tilt family
+
+For the reverse-tilt family, we have
+$$H(t|\theta)=H_0\left(\log(1+\theta(e^t-1))\right).$$
+Differentiating with respect to $t$, we obtain
+$$h(t|\theta) = \frac{\theta e^t}{1+\theta(e^t-1)} h_0\left(\log(1+\theta(e^t-1))\right).$$
+
+```{r}
+hapgwrevtilt <- function(x, theta, phi, lambda, gamma, kappa, log=FALSE){
+  y = 1+theta*(exp(x)-1)
+  C = theta*exp(x)/y
+  h = hapgw(y,phi,lambda,gamma,kappa)
+  return(C*h)
+}
+
+Hapgwrevtilt <- function(x, theta, phi, lambda, gamma, kappa, log=FALSE){
+  y = 1+theta*(exp(x)-1)
+  H = Hapgw(y,phi,lambda,gamma,kappa)
+  return(H)
+}
+
+custom.apgwrevtilt <- list(
+  name="apgwrevtilt",
+  pars=c("phi","lambda","gamma","kappa","theta"),
+  location="theta",
+  transforms=c(log,log,log,kappa_transform,log),
+  inv.transforms=c(exp,exp,exp,kappa_inv_transform,exp),
+  inits=function(t)c(1,1,1,1,1)
+)
+```
+
+
+## Fit models to the simulated datasets
+
+To do:
+
+* fit frailty/tilt/reverse-tilt models to each of the synthetic datasets
+* make diagnostic plots - what plots are useful to rule out what model?
+
+Can use code from the old version, but quite a lot has changed (e.g. dist names, order of the arguments, df names).
+
+

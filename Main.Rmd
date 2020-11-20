@@ -25,6 +25,9 @@ sections <- c('exploring_flexsurv.Rmd',
               'implementing_apgw_in_flexsurv.Rmd',
               'sim_studies_ph_po.Rmd',
               'experiments_fibres_strength_data.Rmd')
+
+sections <- c('implementing_apgw_in_flexsurv.Rmd',
+              'sim_studies.Rmd')
 ```
 
 ```{r child = sections}
