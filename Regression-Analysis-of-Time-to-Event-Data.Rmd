@@ -359,7 +359,7 @@ lines(fs_po, col = cols[2], lwd.obs = 1, lty.obs=1, type="cumhaz")
 legend("topleft", col = c("black", cols[1], cols[2]),  lty = c(2,1,1), bty = "n", lwd = 1, c("Non-parametric estimate", "APGW PH", "APGW PO"))
 ```
 
-```{r eval=FALSE, message=FALSE, echo=TRUE}
+```{r echo=TRUE, eval=FALSE, warning=FALSE, message=FALSE}
 # Test effect of varying censoring mechanism - this is intensive so not run here
 K <- 3
 nk <- rep(300,K)
