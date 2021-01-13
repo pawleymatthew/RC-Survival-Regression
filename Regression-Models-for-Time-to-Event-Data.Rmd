@@ -1,0 +1,516 @@
+---
+title: "Regression Models for Time-to-Event Data"
+author: "Matthew Pawley"
+date: "January 2021"
+output:
+  html_document:
+    theme: cosmo
+    toc: true
+    toc_depth: 2
+    number_sections: true
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(include = TRUE)
+
+library("flexsurv")
+library("survival")
+library("knitr")
+library("dplyr")
+
+cols = c("#E495A5", "#86B875", "#7DB0DD", "#FF8C00")
+
+set.seed(123)
+```
+
+# The APGW distribution
+
+## APGW as a custom distribution in flexsurv
+
+```{r}
+# APGW
+hapgw <- function(x, phi, lambda, gamma, kappa, log=FALSE){
+  lambda*gamma*phi^gamma*(x)^{gamma-1}*(1+((phi*x)^gamma)/(kappa+1))^(kappa-1)
+}
+Hapgw <- function(x, phi, lambda, gamma, kappa, log=FALSE){
+  lambda*(kappa+1)/kappa*((1+(phi*x)^gamma/(kappa+1))^kappa-1)
+}
+kappa_trans <- function(x){log(x+1)}
+kappa_invtrans<- function(x){exp(x)-1}
+
+custom.apgw <- list(
+  name="apgw",
+  pars=c("phi","lambda","gamma","kappa"),
+  location="lambda",
+  transforms=c(log,log,log,kappa_trans),
+  inv.transforms=c(exp,exp,exp,kappa_invtrans),
+  inits=function(t){c(1,median(t)/log(2),1,1)})
+```
+
+```{r}
+# APGW with scale parameter
+hapgwscale<- function(x, lambda, gamma, kappa, theta, log=FALSE){
+   hapgw(x, theta, lambda, gamma, kappa, log=FALSE)
+}
+Hapgwscale <- function(x, lambda, gamma, kappa, theta, log=FALSE){
+   Hapgw(x, theta, lambda, gamma, kappa, log=FALSE)
+}
+custom.apgwscale <- list(
+  name="apgwscale",
+  pars=c("lambda","gamma","kappa","theta"),
+  location="theta",
+  transforms=c(log,log,kappa_trans,log),
+  inv.transforms=c(exp,exp,kappa_invtrans,exp),
+  inits=function(t) c(1,1,1,1)
+)
+```
+
+
+```{r}
+# APGW with frailty parameter
+hapgwfrailty <- function(x, phi, gamma, kappa, theta, log=FALSE){
+  hapgw(x, phi, theta, gamma, kappa, log=FALSE)
+}
+Hapgwfrailty <- function(x, phi, gamma, kappa, theta, log=FALSE){
+  Hapgw(x, phi, theta, gamma, kappa, log=FALSE)
+}
+custom.apgwfrailty <- list(
+  name="apgwfrailty",
+  pars=c("phi","gamma","kappa","theta"),
+  location="theta",
+  transforms=c(log,log,kappa_trans,log),
+  inv.transforms=c(exp,exp,kappa_invtrans,exp),
+  inits=function(t) c(1,1,1,median(t)/log(2))
+)
+```
+
+```{r}
+# APGW with tilt parameter
+hapgwtilt <- function(x, phi, lambda, gamma, kappa, theta, log=FALSE){
+  z <- Hapgw(x, phi, lambda, gamma, kappa)
+  num <- theta * hapgw(x, phi, lambda, gamma, kappa) * exp(z)
+  den <- exp(H_lleg(z, theta))
+  y <- num/den
+  return(y)
+}
+Hapgwtilt <- function(x, phi, lambda, gamma, kappa, theta, log=FALSE){
+  y <- Hapgw(x, phi, lambda, gamma, kappa, log=FALSE)
+  y <- H_lleg(y, theta)
+  return(y)
+}
+custom.apgwtilt <- list(
+  name="apgwtilt",
+  pars=c("phi","lambda","gamma","kappa","theta"),
+  location="theta",
+  transforms=c(log,log,log,kappa_trans,log),
+  inv.transforms=c(exp,exp,exp,kappa_invtrans,exp),
+  inits=function(t) c(1,median(t)/log(2),1,1,1)
+)
+```
+
+```{r echo=TRUE}
+# APGW with reverse-tilt parameter
+hapgwrevtilt <- function(x, phi, lambda, gamma, kappa, theta, log=FALSE){
+  z <- exp(H_lleg(x, theta))
+  C <- theta*exp(x)/z
+  y <- C*hapgw(log(z),phi,lambda,gamma,kappa)
+  return(y)
+}
+Hapgwrevtilt <- function(x, phi, lambda, gamma, kappa, theta, log=FALSE){
+  y <- Hapgw(H_lleg(x, theta), phi, lambda, gamma, kappa)
+  return(y)
+}
+custom.apgwrevtilt <- list(
+  name="apgwrevtilt",
+  pars=c("phi","lambda","gamma","kappa","theta"),
+  location="theta",
+  transforms=c(log,log,log,kappa_trans,log),
+  inv.transforms=c(exp,exp,exp,kappa_invtrans,exp),
+  inits=function(t) c(1, median(t)/log(2), 1, 1, 1)
+)
+```
+
+## Sampling from the APGW distribution
+
+```{r echo=TRUE}
+rapgw <- function(n, phi, lambda, gamma, kappa){
+  v <- rexp(n=n, rate=1)
+  x <- invHapgw(v, phi, lambda, gamma, kappa, log=FALSE)
+  return(x)
+}
+
+rapgw_scale <- function(n, phi, lambda, gamma, kappa, theta){
+  rapgw(n, theta*phi, lambda, gamma, kappa)
+}
+
+rapgw_frailty <- function(n, phi, lambda, gamma, kappa, theta){
+  rapgw(n, phi, theta*lambda, gamma, kappa)
+}
+
+invHapgw <- function(x, phi, lambda, gamma, kappa, log=FALSE){
+  (1/phi)*((kappa+1)*((1+kappa*x/(lambda*(kappa+1)))^(1/kappa)-1))^(1/gamma)
+}
+
+H_lleg <- function(x, theta){log(1+theta*(exp(x)-1))}
+
+rapgw_tilt <- function(n, phi, lambda, gamma, kappa, theta){
+  v <- rexp(n=n, rate=1)
+  x <- H_lleg(v, 1/theta)
+  x <- invHapgw(x, phi, lambda, gamma, kappa, log=FALSE)
+  return(x)
+}
+
+rapgw_revtilt <- function(n, phi, lambda, gamma, kappa, theta){
+  x <- rapgw(n, phi, lambda, gamma, kappa)
+  x <- H_lleg(x, 1/theta)
+  return(x)
+}
+```
+
+## Testing the samplers and custom distributions
+
+* Generate $N=5000$ samples from $\mathrm{APGW}(\phi=1.5,\lambda=1,\gamma=2,\kappa=-0.2)$ with no censoring.
+* Plot sample histogram and true density function.
+* Fit an APGW distribution to the data. Compare the parameter estimates to the true values. 
+
+```{r}
+# Generate APGW samples
+n <- 5000
+phi <- 1
+lambda <- 5
+gamma <- 2
+kappa <- -0.2
+
+t <- rapgw(n, phi, lambda, gamma, kappa)
+delta <- rep(1, n)
+df <- data.frame(t, delta)
+```
+
+```{r}
+# Compare sample hist and true density function
+fun <- function(x){
+  hapgw(x, phi, lambda, gamma, kappa, log=FALSE) * exp(-Hapgw(x, phi, lambda, gamma, kappa, log=FALSE))
+}
+d <- density(t)
+plot(d, main = NA, xlab = "t", ylab = "Density", col=cols[1], lwd=2)
+curve(fun, add=TRUE, col=cols[2], lwd=2, lty=1, main=NA)
+legend("topright", col = c(cols[1], cols[2]), bty = "n", lwd = 2, lty=c(1,1), 
+       c("Kernel density estimate", "Actual"))
+```
+
+
+```{r message=FALSE}
+# Fit APGW model and check estimates
+fs1 <- flexsurvreg(Surv(t,delta)~1, data=df, dist=custom.apgw, fixedpars=1)
+fs1
+```
+
+## Testing the APGW custom distribution on the bc dataset
+
+```{r message=FALSE}
+# Fit an APGW model
+fs1 <- flexsurvreg(Surv(recyrs,censrec)~phi(group), 
+                   data=bc, 
+                   dist=custom.apgw, 
+                   fixedpars=c(2,4),
+                   inits=c(1,1,1,1))
+fs1
+```
+
+```{r message=FALSE}
+# Fit a Weibull model\
+fs2 <- flexsurvreg(Surv(recyrs,censrec)~group, 
+                   data=bc, 
+                   dist="weibull")
+fs2
+```
+
+# Simulation studies
+
+## Simulate data in groups
+
+```{r}
+sim_df <- function(K, nk, t_max, c_rate, phi, lambda, gamma, kappa, theta_1, beta, family){
+
+  group <- rep(1:K, nk)
+  theta <- ifelse(group==1, theta_1, theta_1*exp(beta[group-1]))
+  theta <- theta_1 * exp(c(rep(0,nk[1]), beta[group-1]))
+  
+  # simulate event times
+  if(family == "scale"){t <- mapply(rapgw_scale, phi, lambda, gamma, kappa, theta, MoreArgs=list(n=1))}
+  else if(family == "frailty"){t <- mapply(rapgw_frailty, phi, lambda, gamma, kappa, theta, MoreArgs=list(n=1))}
+  else if(family == "tilt"){t <- mapply(rapgw_tilt, phi, lambda, gamma, kappa, theta, MoreArgs=list(n=1))}
+  else if(family == "revtilt"){t <- mapply(rapgw_revtilt, phi, lambda, gamma, kappa, theta, MoreArgs=list(n=1))}
+  else stop(cat("family must be \"scale\", \"frailty\", \"tilt\", or \"revtilt\""))
+
+  # censoring 
+  c <- rexp(n=sum(nk), rate=c_rate)
+  c <- pmin(c, t_max)
+  delta <- 1*(t<c)
+  t <- pmin(t,c)
+  
+  # create dataframe
+  df <- data.frame("group"=as.factor(group), t, delta)
+  
+  return(df)
+}
+```
+
+## Experiment: frailty (PH) data
+
+* Simulate PH data with 3 groups
+* Make diagnostic plots for AFT/PH/PO
+* Fit AFT/PH/PO/PGT models
+* Compare CH functions of PH and PO models
+* Test the effect of varying the censoring mechanism
+
+```{r}
+# Simulate data
+K <- 3
+nk <- rep(300,K)
+t_max <- 1.5
+c_rate <- 0.1
+phi <- 1
+lambda <- 1
+gamma <- 4
+kappa <- -0.2
+theta_1 <- 2
+beta <- c(0.05, 0.6)
+
+df <- sim_df(K, nk, t_max, c_rate, phi, lambda, gamma, kappa, theta_1, beta, "frailty")
+```
+
+```{r}
+# Plot the survival curves
+km <- survfit(Surv(t, delta) ~ group, data = df)
+plot(km, lty = 1:K, xlab = "t",  ylab = "S(t)") 
+legend("bottomleft", lty = 1:K, bty = "n", paste("Group",1:K))
+```
+
+```{r}
+# Check PH assumption - Schoenfeld residuals test
+res.cox <- coxph(Surv(t, delta) ~ group, data=df)
+test.ph <- cox.zph(res.cox)
+test.ph
+```
+
+```{r}
+# Check PH assumption - plot Schoenfeld residuals
+plot(test.ph)
+```
+
+```{r}
+# Check PH assumption - plot log-log survival curves
+plot(km, fun=function(x) {log(-log(x))},
+     lty = 1:K, xlab = "t",  ylab = "log(-log S(t))", log="x") 
+legend("topleft", lty = 1:K, bty = "n", paste("Group",1:K))
+```
+
+```{r}
+# Check AFT assumption - plot log-time survival curves
+km_log <- survfit(Surv(log(t), delta) ~ group, data = df)
+plot(km_log, fun="S",
+     lty = 1:K, xlab = "log(t)",  ylab = "S(t)") 
+legend("topleft", lty = 1:K, bty = "n", paste("Group",1:K))
+```
+
+```{r}
+# Check AFT assumption - Bartlett test
+g1 <- df$t[df$group==1 & df$delta==1]
+g2 <- df$t[df$group==2 & df$delta==1]
+g3 <- df$t[df$group==3 & df$delta==1]
+k <- 3
+n1 <- length(g1)
+n2 <- length(g2)
+n3 <- length(g3)
+N <- n1 + n2 + n3
+var1 <- var(log(g1))
+var2 <- var(log(g2))
+var3 <- var(log(g3))
+Sp2 <- ((n1-1)*var1 + (n2-1)*var2 + (n3-1)*var3) / (N-k)
+test_stat <- ((N-k)*log(Sp2) - ((n1-1)*log(var1) + (n2-1)*log(var2) + (n3-1)*log(var3)))/(1+(1/(n1-1)+1/(n2-1)+1/(n3-1)-1/(N-k))/(3*(k-1)))
+p_value <- pchisq(test_stat, df=k-1, lower.tail = FALSE)
+```
+
+```{r echo=FALSE}
+print(paste("The sample variances of the log survival times for each group are", round(var1,3),",", round(var2,3),"and", round(var3,3), "respectively."))
+print(paste("Bartlett test p-value:", round(p_value,3)))
+```
+
+```{r}
+# Check PO assumption - log odds curves
+plot(km, fun=function(x) {log((1-x)/x)},
+     lty = 1:K, xlab = "t",  ylab = "Log odds", log="x") 
+legend("topleft", lty = 1:K, bty = "n", paste("Group",1:K))
+```
+
+```{r message=FALSE}
+# Fit AFT/PH/PO/PGT models
+fs_aft <- flexsurvreg(Surv(t,delta)~group, data=df, dist=custom.apgwscale, fixedpars=1)
+fs_ph <- flexsurvreg(Surv(t,delta)~group, data=df,  dist=custom.apgwfrailty, fixedpars=1)
+fs_po <- flexsurvreg(Surv(t,delta)~group, data=df, dist=custom.apgwtilt, fixedpars=1)
+fs_pgt <- flexsurvreg(Surv(t,delta)~group, data=df, dist=custom.apgwrevtilt, fixedpars=1)
+```
+
+```{r}
+# Compare the CH functions of the PH and PO 
+plot(fs_ph, col = cols[1], lwd.obs = 1, lty.obs=2, type="cumhaz", xlab = "t", ylab = "H(t)", yaxs="i", xaxs="i")
+lines(fs_po, col = cols[2], lwd.obs = 1, lty.obs=1, type="cumhaz")
+legend("topleft", col = c("black", cols[1], cols[2]),  lty = c(2,1,1), bty = "n", lwd = 1, c("Non-parametric estimate", "APGW PH", "APGW PO"))
+```
+
+```{r eval=FALSE, message=FALSE, echo=TRUE}
+# Test effect of varying censoring mechanism - this is intensive so not run here
+K <- 3
+nk <- rep(300,K)
+c_rate <- 0.0001
+phi <- 1
+lambda <- 1
+gamma <- 4
+kappa <- -0.2
+theta_1 <- 2
+beta <- c(0.05, 0.6)
+
+t_max_vals <- seq(from=0.5, to=2.5, by=0.2)
+M <- 20
+ph_aic <- matrix(NA, nrow=length(t_max_vals), ncol=M)
+po_aic <- matrix(NA, nrow=length(t_max_vals), ncol=M)
+
+for (i in 1:length(t_max_vals)){
+  t_max <- t_max_vals[i]
+  for (j in 1:M){
+    df <- sim_df(K, nk, t_max, c_rate, phi, lambda, gamma, kappa, theta_1, beta, "frailty")
+    tryCatch(
+      expr = {
+        fs_ph <- flexsurvreg(Surv(t,delta)~group, data=df, dist=custom.apgwfrailty, fixedpars=1)
+        ph_aic[i,j] <- fs_ph$AIC
+      },
+      error = function(e){
+        ph_aic[i,j] <- NA
+      }
+    )
+    tryCatch(
+      expr = {
+        fs_po <- flexsurvreg(Surv(t,delta)~group, data=df, dist=custom.apgwtilt, fixedpars=1)
+        po_aic[i,j] <- fs_po$AIC
+      },
+      error = function(e){
+        po_aic[i,j] <- NA
+      }
+    )
+  }
+}
+
+ph_aic <- rowMeans(ph_aic, na.rm = TRUE)
+po_aic <- rowMeans(po_aic, na.rm = TRUE)
+plot(t_max_vals, po_aic-ph_aic, type="l", 
+     xlab = "Administrative censoring time",
+     ylab = "Difference in AICs of PH and PO models")
+```
+
+# Fibres data
+
+* Plot diagnostics
+* Fit PO models
+
+```{r}
+# Load data
+fibres_df <- read.csv(file = 'fibres_failure_stress.csv', header = TRUE)
+fibres_df$length <- as.factor(fibres_df$length)
+fibres_df$delta <- 1
+```
+
+```{r}
+# Plot survival curves
+km <- survfit(Surv(fail_stress, delta) ~ length, data = fibres_df)
+plot(km, lty = 1:4, xlab = "t",  ylab = "S(t)") 
+legend("bottomleft", lty = 1:4, bty = "n", c("1mm","10mm","20mm","50mm"))
+```
+
+```{r}
+# Check PH assumption - Schoenfeld residuals test
+res.cox <- coxph(Surv(fail_stress, delta) ~ length, data = fibres_df)
+test.ph <- cox.zph(res.cox)
+test.ph
+```
+
+```{r}
+# Check PH assumption - plot Schoenfeld residuals
+plot(test.ph)
+```
+
+```{r}
+# Check PH assumption - plot log-log survival curves
+plot(km, fun=function(x) {log(-log(x))}, lty = 1:4, xlab = "t",  ylab = "log(-log S(t))", log="x") 
+legend("topleft", lty = 1:4, bty = "n", c("1mm","10mm","20mm","50mm"))
+```
+
+```{r}
+# Check AFT assumption - plot log-time survival curves
+km_log <- survfit(Surv(log(fail_stress), delta) ~ length, data = fibres_df)
+plot(km_log, lty = 1:4, xlab = "log(t)",  ylab = "S(t)") 
+legend("bottomleft", lty = 1:4, bty = "n", c("1mm","10mm","20mm","50mm"))
+```
+
+```{r}
+# Check PO assumption - log-odds curves
+plot(km, fun=function(x) {log((1-x)/x)}, lty = 1:4, xlab = "t",  ylab = "Log odds", log="x") 
+legend("topleft", lty = 1:4, bty = "n", c("1mm","10mm","20mm","50mm"))
+```
+
+
+```{r}
+# Fit AFT model
+fs <- flexsurvreg(Surv(fail_stress, delta) ~ length, data=fibres_df, dist=custom.apgwscale, fixedpars=1)
+fs
+```
+
+# PBC dataset
+
+* Pre-processing
+* Categorise patients into groups
+* Fit PO model
+
+```{r}
+# pre-processing
+pbc$time <- pbc$time / 365
+pbc$status[pbc$status==1] <- 0
+pbc$status[pbc$status==2] <- 1
+pbc$logalbumin <- log(pbc$albumin) - mean(log(pbc$albumin))
+pbc$logbili <- log(pbc$bili) - mean(log(pbc$bili))
+pbc$protime[is.na(pbc$protime)] <- mean(pbc$protime, na.rm = TRUE)
+pbc$logprotime <- log(pbc$protime) - mean(log(pbc$protime))
+
+kable(head(pbc))
+```
+
+```{r fig.height=10}
+# Plot histograms to split patients into groups
+# Check PO assumption for these groups
+
+par(mfrow=c(2,2))
+
+hist(pbc[,"logalbumin"], xlab="logalbumin", main=NULL)
+hist(pbc[,"logprotime"], xlab="logprotime", main=NULL)
+
+pbc$logalbumincat <- cut(pbc$logalbumin, breaks=c(-Inf, -0.05, Inf),   labels=c("Low","High"))  
+
+km_logalb <- survfit(Surv(time, status) ~ logalbumincat, data = pbc)
+plot(km_logalb, fun=function(x) {log((1-x)/x)}, lty = 1:2, xlab = "t",  ylab = "Log odds", log="x") 
+legend("topleft", lty = 1:2, bty = "n", c("Low","High"),title="log(albumin)")
+
+pbc$logprotimecat <- cut(pbc$logprotime, breaks=c(-Inf, 0, Inf),labels=c("Low","High"))  
+
+km_logprotime <- survfit(Surv(time, status) ~ logprotimecat, data = pbc)
+plot(km_logprotime , fun=function(x) {log((1-x)/x)}, lty = 1:2, xlab = "t",  ylab = "Log odds", log="x") 
+legend("topleft", lty = 1:2, bty = "n", c("Low","High"), title="log(protime)")
+```
+
+
+```{r message=FALSE}
+# Fit PO model
+fs_po <- flexsurvreg(Surv(time, status) ~ age + edema + logbili + logalbumin + logprotime, data=pbc, dist=custom.apgwtilt, inits=c(1/18.4,1,1.54,1,1), fixedpars=2)
+fs_po
+```
+
+
